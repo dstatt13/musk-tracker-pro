@@ -15,7 +15,7 @@ ELON_USER_ID = "44196397"
 ELON_USERNAME = "elonmusk"
 
 # Data collection
-POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "60"))
+POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "30"))
 DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tweets.db")
 
 # HMM Model

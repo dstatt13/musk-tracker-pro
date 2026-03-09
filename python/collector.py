@@ -222,7 +222,7 @@ def collect_once() -> int | None:
     """
     total = fetch_total_post_count()
     if total is None:
-        print(f"[{datetime.utcnow().isoformat()}] Failed to fetch post count")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Failed to fetch post count")
         return None
 
     last = get_last_snapshot()

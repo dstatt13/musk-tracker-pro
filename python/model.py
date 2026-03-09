@@ -249,10 +249,19 @@ def predict_date_range(start_date: str, end_date: str, threshold: int | None = N
     print(f"{'='*60}")
     print(f"Window: {window_days} days (starts in {lead_days} days)")
     print(f"Current state: {state_label}")
-    print(f"Mean:   {result['mean']:.1f} tweets")
-    print(f"Median: {result['median']:.1f} tweets")
-    print(f"90% CI: [{result['ci_5']:.0f}, {result['ci_95']:.0f}]")
-    print(f"P(>0):  {result['prob_gt_0']*100:.1f}%")
+    print(f"\nSummary Stats:")
+    print(f"  Mean:   {result['mean']:.1f} tweets")
+    print(f"  Median: {result['median']:.1f} tweets")
+    print(f"  90% CI: [{result['ci_5']:.0f}, {result['ci_95']:.0f}]")
+
+    # Generate probability buckets
+    print(f"\n{'='*60}")
+    print("PROBABILITY BREAKDOWN BY RANGE")
+    print(f"{'='*60}")
+    buckets = generate_probability_buckets(totals)
+    for bucket in buckets:
+        bar = "█" * int(bucket["prob"] * 40)
+        print(f"  {bucket['range']:>12}:  {bucket['prob']*100:5.1f}%  {bar}")
 
     if threshold is not None:
         prob = float(np.mean(totals >= threshold))
@@ -269,3 +278,41 @@ def predict_date_range(start_date: str, end_date: str, threshold: int | None = N
             print("→ Signal: STRONG NO")
 
     return result
+
+
+def generate_probability_buckets(distribution: np.ndarray, n_buckets: int = 10) -> list[dict]:
+    """
+    Break a Monte Carlo distribution into probability buckets.
+    Returns list of {range: "40-60", prob: 0.25, lower: 40, upper: 60}
+    """
+    min_val = max(0, np.floor(np.percentile(distribution, 1)))
+    max_val = np.ceil(np.percentile(distribution, 99))
+    
+    # Create nice round bucket boundaries
+    bucket_size = max(5, int(np.ceil((max_val - min_val) / n_buckets / 5) * 5))
+    
+    buckets = []
+    lower = int(min_val - (min_val % bucket_size))  # Round down to bucket size
+    
+    while lower < max_val + bucket_size:
+        upper = lower + bucket_size
+        prob = float(np.mean((distribution >= lower) & (distribution < upper)))
+        if prob > 0.001:  # Only include buckets with >0.1% probability
+            buckets.append({
+                "range": f"{lower}-{upper}",
+                "lower": lower,
+                "upper": upper,
+                "prob": prob,
+            })
+        lower = upper
+    
+    return buckets
+
+
+def predict_single_day(target_date: str, threshold: int | None = None) -> dict | None:
+    """Convenience wrapper for single-day predictions."""
+    from datetime import datetime, timedelta
+    
+    start = datetime.strptime(target_date, "%Y-%m-%d")
+    end = start + timedelta(days=1)
+    return predict_date_range(target_date, end.strftime("%Y-%m-%d"), threshold)

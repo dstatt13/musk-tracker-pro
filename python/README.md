@@ -1,8 +1,8 @@
-# Elon Musk Tweet Predictor
+# Trump Truth Social Post Predictor
 
-A Hidden Markov Model + Monte Carlo simulation tool for predicting Elon Musk's X (Twitter) posting activity. Designed for Polymarket betting on "Will Elon Musk tweet X times in Y days?" markets.
+A Hidden Markov Model + Monte Carlo simulation tool for predicting Donald Trump's Truth Social posting activity. Designed for Polymarket betting on "Will Trump post X times in Y days?" markets.
 
-**No API keys required** — uses Playwright to scrape x.com directly.
+**No API keys required** — uses Truth Social's public Mastodon-compatible API.
 
 ---
 
@@ -11,11 +11,9 @@ A Hidden Markov Model + Monte Carlo simulation tool for predicting Elon Musk's X
 ```bash
 cd python
 pip install -r requirements.txt
-python -m playwright install chromium
-python main.py
+python main.py --backfill 30   # Instantly load ~30 days of history
+python main.py                  # Start 24/7 tracker
 ```
-
-This starts the 24/7 collector. Let it run for ~14 days to gather enough data for predictions.
 
 ---
 
@@ -27,16 +25,17 @@ This starts the 24/7 collector. Let it run for ~14 days to gather enough data fo
 |---------|-------------|
 | `python main.py` | Start 24/7 collector + auto-predictions (after 14 days) |
 | `python main.py --collect-only` | Collect data only, no predictions |
-| `python main.py --manual <count>` | Manually record a total tweet count |
+| `python main.py --backfill [N]` | Backfill N days of history from timeline (default 30) |
+| `python main.py --manual <count>` | Manually record a total post count |
 
 ### Predictions
 
 | Command | Description |
 |---------|-------------|
 | `python main.py --predict-only` | Run predictions on existing data (1, 3, 7, 14, 30 day forecasts) |
-| `python main.py --range <start> <end>` | Predict tweets for a specific date range |
-| `python main.py --range <start> <end> <threshold>` | Same + probability of hitting ≥threshold tweets |
-| `python main.py --threshold <min_tweets> <days>` | Polymarket query: probability of ≥N tweets in D days |
+| `python main.py --range <start> <end>` | Predict posts for a specific date range |
+| `python main.py --range <start> <end> <threshold>` | Same + probability of hitting ≥threshold posts |
+| `python main.py --threshold <min_posts> <days>` | Polymarket query: probability of ≥N posts in D days |
 
 ---
 
@@ -44,39 +43,34 @@ This starts the 24/7 collector. Let it run for ~14 days to gather enough data fo
 
 ### `python main.py` — 24/7 Collector
 
-Scrapes Elon's tweet count every hour, stores in SQLite. Predictions auto-activate after 14+ days of data.
+Polls Trump's post count every 30 minutes via the Truth Social API, stores in SQLite. Predictions auto-activate after 14+ days of data.
 
 ```bash
 python main.py
-# Starting Elon Musk Tweet Tracker...
-# Polling every 60 minutes
-# Using Playwright web scraper (no API key needed)
+# Starting Trump Truth Social Post Tracker...
+# Polling every 30 minutes
+# Using Truth Social public Mastodon API (no API key needed)
 ```
 
-Press `Ctrl+C` to stop gracefully. All data is persisted in `data/tweets.db`.
+Press `Ctrl+C` to stop gracefully. All data is persisted in `data/posts.db`.
 
 ---
 
-### `python main.py --collect-only` — Collect Without Predictions
+### `python main.py --backfill [N]` — Instant History
 
-Same as default, but skips the prediction phase entirely. Useful when you just want to accumulate data.
-
-```bash
-python main.py --collect-only
-```
-
----
-
-### `python main.py --manual <count>` — Manual Count Entry
-
-Fallback when scraping fails (e.g., X blocks the request). Find the count on Elon's profile page (`x.com/elonmusk`).
+Paginates through Trump's timeline to backfill daily post counts. **Run this first** to skip the 14-day data collection wait.
 
 ```bash
-python main.py --manual 42567
-# Manually recorded: 42,567 tweets
+python main.py --backfill 30
+# Backfilling daily counts for the last 30 days...
+#   Page 1: processed 40 posts (oldest: 2026-03-08)
+#   Page 2: processed 40 posts (oldest: 2026-03-06)
+#   ...
+# Backfilled 30 days of data
+#   2026-02-07: 12 posts
+#   2026-02-08: 8 posts
+#   ...
 ```
-
-Entries are saved to `data/manual_counts.csv` and also processed through the normal pipeline.
 
 ---
 
@@ -94,60 +88,38 @@ python main.py --predict-only
 
 ```
 7-day forecast:
-  Mean:   48.3 tweets
-  Median: 46.0 tweets
+  Mean:   48.3 posts
+  Median: 46.0 posts
   90% CI: [18, 82]
   P(>0):  100.0%
 ```
 
 ---
 
-### `python main.py --range <start_date> <end_date> [threshold]` — Date Range Prediction
+### `python main.py --range <start_date> <end_date> [threshold]`
 
-Predict total tweets for a specific future date range. Accounts for uncertainty by simulating "lead days" between now and the start date.
+Predict total posts for a specific future date range.
 
 ```bash
-# Predict tweets from March 9-12, 2026
 python main.py --range 2026-03-09 2026-03-12
-
-# Same, but also check probability of ≥50 tweets
 python main.py --range 2026-03-09 2026-03-12 50
 ```
 
-**Output includes:**
-- Summary stats (mean, median, 90% CI)
-- Probability breakdown by range:
-  ```
-  PROBABILITY BREAKDOWN BY RANGE
-  ============================================================
-         0-20:   5.2%  ██
-        20-40:  18.3%  ███████
-        40-60:  31.7%  ████████████
-        60-80:  26.4%  ██████████
-       80-100:  12.8%  █████
-      100-120:   4.1%  █
-  ```
-- Threshold probability with trading signal (if threshold provided)
-
 ---
 
-### `python main.py --threshold <min_tweets> <days>` — Polymarket Query
+### `python main.py --threshold <min_posts> <days>` — Polymarket Query
 
-Directly answers "Will Elon tweet ≥N times in D days?" with a probability and trading signal.
+Directly answers "Will Trump post ≥N times in D days?" with a probability and trading signal.
 
 ```bash
-# "Will Elon tweet ≥50 times in the next 7 days?"
 python main.py --threshold 50 7
-
-# "Will Elon tweet ≥10 times tomorrow?"
-python main.py --threshold 10 1
 ```
 
 **Output:**
 ```
 POLYMARKET QUERY
 ============================================================
-Question: Will Elon tweet ≥50 times in 7 days?
+Question: Will Trump post ≥50 times in 7 days?
 Current state: Medium
 Estimated probability: 72.3%
 ============================================================
@@ -169,23 +141,19 @@ Estimated probability: 72.3%
 ## How It Works
 
 ### 1. Data Collection
-- Playwright loads `x.com/elonmusk` in a headless browser
-- Extracts total post count from profile
-- Computes delta since last check
-- Stores hourly snapshots + daily aggregates in SQLite
+- Calls Truth Social's public Mastodon-compatible API (no auth needed)
+- Gets exact total post count from profile endpoint
+- Counts individual posts per day from the timeline endpoint
+- Stores snapshots + daily aggregates in SQLite
 
 ### 2. Hidden Markov Model (HMM)
-Learns 3 behavioral "states" from historical daily tweet counts:
+Learns 3 behavioral "states" from historical daily post counts:
 
 | State | Description |
 |-------|-------------|
-| **Low** | Minimal tweeting (busy with SpaceX/Tesla, traveling, etc.) |
+| **Low** | Minimal posting (quiet days, travel, etc.) |
 | **Medium** | Baseline activity |
-| **High** | Tweet storms (controversy, product launch, meme spree) |
-
-The model learns:
-- **Emission distributions**: How many tweets per day in each state (Gaussian)
-- **Transition probabilities**: Likelihood of switching states day-to-day
+| **High** | Post storms (major news, rallies, controversies) |
 
 ### 3. Monte Carlo Simulation
 For predictions:
@@ -197,11 +165,9 @@ For predictions:
 
 ## Data Storage
 
-All data persists locally between runs:
-
 | File | Description |
 |------|-------------|
-| `data/tweets.db` | SQLite database (snapshots, daily counts, predictions) |
+| `data/posts.db` | SQLite database (snapshots, daily counts, predictions) |
 | `data/manual_counts.csv` | Fallback manual entries |
 
 ---
@@ -212,9 +178,15 @@ Edit `config.py` or create a `.env` file:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POLL_INTERVAL_MINUTES` | 30 | How often to scrape |
+| `POLL_INTERVAL_MINUTES` | 30 | How often to poll the API |
 | `N_HIDDEN_STATES` | 3 | HMM states (Low/Medium/High) |
 | `N_SIMULATIONS` | 10,000 | Monte Carlo runs |
+
+---
+
+## Key Advantage Over X/Twitter
+
+Truth Social is built on Mastodon, which provides a **public API with exact post counts** — no rounding, no API keys, no rate limit issues. This gives us granular daily data (single-digit accuracy) compared to X's rounded "98.7K posts" display.
 
 ---
 
@@ -223,14 +195,14 @@ Edit `config.py` or create a `.env` file:
 ```
 python/
 ├── main.py          # CLI entry point
-├── collector.py     # Playwright scraper + data collection
+├── collector.py     # Truth Social API collector
 ├── model.py         # HMM training + Monte Carlo predictions
 ├── database.py      # SQLite schema & queries
 ├── config.py        # Configuration constants
 ├── requirements.txt # Python dependencies
 └── data/
-    ├── tweets.db           # SQLite database (auto-created)
-    └── manual_counts.csv   # Fallback manual entries
+    ├── posts.db             # SQLite database (auto-created)
+    └── manual_counts.csv    # Fallback manual entries
 ```
 
 ---
@@ -239,19 +211,18 @@ python/
 
 | Problem | Solution |
 |---------|----------|
-| "Playwright not installed" | `pip install playwright && python -m playwright install chromium` |
-| "Could not find post count in page HTML" | X changed layout — use `--manual <count>` as fallback |
-| "Need ≥14 days of data" | Keep the collector running; HMM needs 2+ weeks to train |
-| Timeout errors | Expected — X streams data continuously; the scraper uses `domcontentloaded` to avoid this |
+| "Need ≥14 days of data" | Run `python main.py --backfill 30` to instantly load history |
+| API returns empty data | Truth Social may be rate-limiting; wait a few minutes and retry |
+| "Failed to fetch post count" | Check internet connection; Truth Social API may be temporarily down |
 
 ---
 
 ## Tips for Polymarket
 
-1. **Check current state first** — High state → expect more tweets
+1. **Check current state first** — High state → expect more posts
 2. **Use date ranges for specific markets** — Match the market's exact window
-3. **Consider lead time** — Predictions further out have wider confidence intervals
-4. **Look at the distribution** — A 50% probability with tight CI is different from 50% with huge variance
+3. **Backfill before predicting** — Run `--backfill 60` for better model accuracy
+4. **Look at the distribution** — A 50% probability with tight CI differs from 50% with huge variance
 5. **Don't bet on coin flips** — Only trade when probability is >60% or <40%
 
 ---

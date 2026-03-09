@@ -1,4 +1,4 @@
-"""SQLite database for storing tweet count snapshots."""
+"""SQLite database for storing post count snapshots."""
 
 import sqlite3
 import os
@@ -65,13 +65,20 @@ def get_last_snapshot() -> dict | None:
     return dict(row) if row else None
 
 
-def upsert_daily_count(date_str: str, count: int):
+def upsert_daily_count(date_str: str, count: int, replace: bool = False):
     conn = get_connection()
-    conn.execute(
-        "INSERT INTO daily_counts (date, tweet_count) VALUES (?, ?) "
-        "ON CONFLICT(date) DO UPDATE SET tweet_count = tweet_count + ?",
-        (date_str, count, count),
-    )
+    if replace:
+        conn.execute(
+            "INSERT INTO daily_counts (date, tweet_count) VALUES (?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET tweet_count = ?",
+            (date_str, count, count),
+        )
+    else:
+        conn.execute(
+            "INSERT INTO daily_counts (date, tweet_count) VALUES (?, ?) "
+            "ON CONFLICT(date) DO UPDATE SET tweet_count = tweet_count + ?",
+            (date_str, count, count),
+        )
     conn.commit()
     conn.close()
 

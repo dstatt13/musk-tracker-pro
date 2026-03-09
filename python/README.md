@@ -1,27 +1,16 @@
 # Elon Musk Tweet Predictor
 
-HMM + Monte Carlo prediction model for Elon Musk's X (Twitter) posting activity, designed for Polymarket betting.
+HMM + Monte Carlo prediction model for Elon Musk's X posting activity, designed for Polymarket betting.
 
-## How it Works
-
-1. **Data Collection**: Polls X API every hour for Elon's total tweet count, computes deltas, stores daily counts in SQLite
-2. **Hidden Markov Model**: Learns 3 behavioral states (Low/Medium/High activity) and transition probabilities between them
-3. **Monte Carlo Simulation**: Runs 10,000 simulated futures from the current state to predict tweet counts over various windows
-4. **Polymarket Signals**: Translates predictions into probability estimates for "Will Elon tweet ≥X times in Y days?" style markets
+**No API keys required** — uses Playwright to scrape x.com directly.
 
 ## Setup
 
 ```bash
 cd python
 pip install -r requirements.txt
+playwright install chromium
 ```
-
-Create `.env` file:
-```
-X_BEARER_TOKEN=your_bearer_token_here
-```
-
-Get a Bearer Token at: https://developer.x.com/en/portal/dashboard
 
 ## Usage
 
@@ -30,7 +19,7 @@ Get a Bearer Token at: https://developer.x.com/en/portal/dashboard
 python main.py
 ```
 
-### Collect data only (no predictions)
+### Collect data only
 ```bash
 python main.py --collect-only
 ```
@@ -44,31 +33,32 @@ python main.py --predict-only
 ```bash
 # "Will Elon tweet ≥50 times in 7 days?"
 python main.py --threshold 50 7
-
-# "Will Elon tweet ≥10 times in 1 day?"
-python main.py --threshold 10 1
 ```
+
+### Manual count entry (fallback if scraping fails)
+```bash
+python main.py --manual 42567
+```
+
+## How it Works
+
+1. **Data Collection**: Scrapes x.com/elonmusk every hour for total post count, computes deltas, stores in SQLite
+2. **Hidden Markov Model**: Learns 3 behavioral states (Low/Medium/High activity) with transition probabilities
+3. **Monte Carlo Simulation**: 10,000 simulated futures from current state → probabilistic forecasts
+4. **Polymarket Signals**: Probability estimates for "Will Elon tweet ≥X times in Y days?" markets
 
 ## Architecture
 
 ```
-collector.py  → X API polling → SQLite (tweet_snapshots, daily_counts)
+collector.py  → Playwright scraper → SQLite (tweet_snapshots, daily_counts)
 model.py      → HMM training → Monte Carlo → predictions table
-main.py       → Orchestrator (scheduler, CLI interface)
+main.py       → Orchestrator (scheduler, CLI)
 database.py   → SQLite schema & queries
-config.py     → All configuration + .env loading
+config.py     → Configuration
 ```
-
-## Model Details
-
-- **States**: 3 Gaussian-emission states sorted by mean activity level
-- **Training**: Expectation-Maximization via `hmmlearn`
-- **Prediction**: Forward-simulate state transitions + emission sampling
-- **Confidence**: 90% credible intervals from simulation distribution
 
 ## Notes
 
-- Needs ~14 days of hourly data collection before predictions are meaningful
-- The model improves as more data accumulates
-- Free X API tier supports user lookup; check rate limits at https://developer.x.com
-- State labels (Low/Medium/High) are relative to observed data distribution
+- Needs ~14 days of data before predictions are meaningful
+- If Playwright scraping breaks (X changes layout), use `--manual` to keep feeding data
+- Adjust `POLL_INTERVAL_MINUTES` in `.env` if needed (default: 60)

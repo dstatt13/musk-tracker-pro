@@ -1,109 +1,137 @@
 """
-Collects Elon Musk's tweet count by scraping x.com profile with Playwright.
+Collects Trump's Truth Social post counts via the public Mastodon-compatible API.
 
-Falls back to a manual CSV if scraping fails.
-After first install, run: playwright install chromium
+No API keys or authentication required for public profiles.
+Two collection methods:
+  1. Profile lookup — gets total statuses_count (exact, not rounded)
+  2. Timeline scrape — counts individual posts per day (granular)
 """
 
-import re
 import csv
 import os
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timezone, timedelta
+from urllib.request import urlopen, Request
+from urllib.error import URLError, HTTPError
 from database import insert_snapshot, get_last_snapshot, upsert_daily_count
+from config import TRUTH_SOCIAL_ACCOUNT_ID, TRUTH_SOCIAL_API_BASE, TRUTH_SOCIAL_USERNAME
 
-ELON_PROFILE_URL = "https://x.com/elonmusk"
 CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "manual_counts.csv")
 
-
-def parse_count(text: str) -> int | None:
-    """Parse '45.2K posts' or '45,231 posts' into an integer."""
-    text = text.strip().lower().replace(",", "")
-    match = re.search(r"([\d.]+)\s*([kmb]?)", text)
-    if not match:
-        return None
-    num = float(match.group(1))
-    suffix = match.group(2)
-    multiplier = {"k": 1_000, "m": 1_000_000, "b": 1_000_000_000}.get(suffix, 1)
-    return int(num * multiplier)
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
 
-def fetch_tweet_count_playwright() -> int | None:
-    """Scrape Elon's total post count from x.com using Playwright."""
+def api_get(endpoint: str, params: dict = None) -> dict | list | None:
+    """Make a GET request to Truth Social's Mastodon API."""
+    url = f"{TRUTH_SOCIAL_API_BASE}{endpoint}"
+    if params:
+        query = "&".join(f"{k}={v}" for k, v in params.items())
+        url = f"{url}?{query}"
+
+    req = Request(url, headers={"User-Agent": USER_AGENT})
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        print("Playwright not installed. Run: pip install playwright && playwright install chromium")
-        return None
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
-            )
-            page = context.new_page()
-            # Use "domcontentloaded" — x.com never reaches "networkidle"
-            page.goto(ELON_PROFILE_URL, wait_until="domcontentloaded", timeout=30000)
-
-            # Wait for profile content to render
-            page.wait_for_timeout(5000)
-
-            html = page.content()
-            browser.close()
-
-            # Search for post count pattern in full HTML
-            # Patterns: "42,567 posts", "42.5K posts", etc.
-            patterns = [
-                r'([\d,]+)\s*(?:posts|Posts)',
-                r'([\d.]+[KkMm])\s*(?:posts|Posts)',
-            ]
-
-            for pattern in patterns:
-                match = re.search(pattern, html)
-                if match:
-                    count = parse_count(match.group(1) + " posts")
-                    if count and count > 10_000:  # Elon has way more than 10K
-                        print(f"Scraped tweet count: {count:,}")
-                        return count
-
-            print("Could not find post count in page HTML")
-            return None
-
-    except Exception as e:
-        print(f"Playwright scraping error: {e}")
+        with urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode())
+    except (URLError, HTTPError) as e:
+        print(f"API error ({url}): {e}")
         return None
 
 
-def fetch_tweet_count_csv() -> int | None:
-    """Read the latest manually entered count from CSV fallback."""
-    if not os.path.exists(CSV_PATH):
-        return None
-    try:
-        with open(CSV_PATH, "r") as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
-            if rows:
-                last = rows[-1]
-                return int(last["total_tweets"])
-    except Exception as e:
-        print(f"CSV read error: {e}")
+def fetch_total_post_count() -> int | None:
+    """Get Trump's exact total post count from profile lookup."""
+    data = api_get(f"/accounts/{TRUTH_SOCIAL_ACCOUNT_ID}")
+    if data and "statuses_count" in data:
+        count = data["statuses_count"]
+        print(f"Total post count from API: {count:,}")
+        return count
+    print("Failed to fetch profile data")
     return None
 
 
-def fetch_tweet_count() -> int | None:
-    """Try Playwright first, fall back to CSV."""
-    count = fetch_tweet_count_playwright()
-    if count is None:
-        print("Playwright failed, trying CSV fallback...")
-        count = fetch_tweet_count_csv()
+def fetch_posts_since(since_id: str = None, limit: int = 40) -> list[dict]:
+    """
+    Fetch recent posts from Trump's timeline.
+    Returns list of posts with id, created_at, content, etc.
+    """
+    params = {"limit": str(limit), "exclude_replies": "false"}
+    if since_id:
+        params["since_id"] = since_id
+
+    data = api_get(f"/accounts/{TRUTH_SOCIAL_ACCOUNT_ID}/statuses", params)
+    if data is None:
+        return []
+    return data
+
+
+def count_posts_today() -> int:
+    """Count how many posts Trump made today by paginating through the timeline."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    count = 0
+    max_id = None
+
+    for _ in range(10):  # Max 10 pages (400 posts) to prevent infinite loops
+        params = {"limit": "40", "exclude_replies": "false"}
+        if max_id:
+            params["max_id"] = max_id
+
+        posts = api_get(f"/accounts/{TRUTH_SOCIAL_ACCOUNT_ID}/statuses", params)
+        if not posts:
+            break
+
+        for post in posts:
+            post_date = post["created_at"][:10]  # "2026-03-09T..."
+            if post_date == today:
+                count += 1
+            elif post_date < today:
+                # We've gone past today, stop
+                return count
+
+        # Set up pagination
+        if posts:
+            max_id = posts[-1]["id"]
+        else:
+            break
+
+    return count
+
+
+def count_posts_by_date(target_date: str) -> int:
+    """Count posts for a specific date (YYYY-MM-DD) by paginating the timeline."""
+    count = 0
+    max_id = None
+
+    for _ in range(20):  # Max 20 pages
+        params = {"limit": "40", "exclude_replies": "false"}
+        if max_id:
+            params["max_id"] = max_id
+
+        posts = api_get(f"/accounts/{TRUTH_SOCIAL_ACCOUNT_ID}/statuses", params)
+        if not posts:
+            break
+
+        for post in posts:
+            post_date = post["created_at"][:10]
+            if post_date == target_date:
+                count += 1
+            elif post_date < target_date:
+                return count
+
+        if posts:
+            max_id = posts[-1]["id"]
+        else:
+            break
+
     return count
 
 
 def collect_once() -> int | None:
-    """Fetch current count, compute delta, store snapshot and daily count."""
-    total = fetch_tweet_count()
+    """
+    Fetch current total count, compute delta, store snapshot and daily count.
+    Also counts today's posts individually for granular daily data.
+    """
+    total = fetch_total_post_count()
     if total is None:
-        print(f"[{datetime.utcnow().isoformat()}] Failed to fetch tweet count")
+        print(f"[{datetime.utcnow().isoformat()}] Failed to fetch post count")
         return None
 
     last = get_last_snapshot()
@@ -113,24 +141,93 @@ def collect_once() -> int | None:
 
     insert_snapshot(total, delta)
 
-    if delta > 0:
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        upsert_daily_count(today, delta)
+    # Also get granular daily count by counting individual posts
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    today_count = count_posts_today()
+    if today_count > 0:
+        # Use the actual counted posts rather than the delta
+        upsert_daily_count(today, today_count, replace=True)
+        print(f"[{datetime.utcnow().isoformat()}] Total: {total:,}, Today's posts: {today_count}")
+    else:
+        print(f"[{datetime.utcnow().isoformat()}] Total: {total:,}, Delta: +{delta}")
+        if delta > 0:
+            upsert_daily_count(today, delta)
 
-    print(f"[{datetime.utcnow().isoformat()}] Total: {total:,}, Delta: +{delta}")
-    return delta
+    return today_count or delta
 
 
-def add_manual_count(total_tweets: int):
+def backfill_daily_counts(days: int = 30):
+    """
+    Backfill daily post counts by paginating through the timeline history.
+    Useful for building up initial training data faster.
+    """
+    print(f"Backfilling daily counts for the last {days} days...")
+    today = datetime.now(timezone.utc).date()
+    counts_by_date = {}
+    max_id = None
+    cutoff = (today - timedelta(days=days)).strftime("%Y-%m-%d")
+
+    page = 0
+    while page < 100:  # Safety limit
+        params = {"limit": "40", "exclude_replies": "false"}
+        if max_id:
+            params["max_id"] = max_id
+
+        posts = api_get(f"/accounts/{TRUTH_SOCIAL_ACCOUNT_ID}/statuses", params)
+        if not posts:
+            break
+
+        for post in posts:
+            post_date = post["created_at"][:10]
+            if post_date < cutoff:
+                # Done — store everything and return
+                _store_backfill(counts_by_date)
+                return counts_by_date
+            counts_by_date[post_date] = counts_by_date.get(post_date, 0) + 1
+
+        max_id = posts[-1]["id"]
+        page += 1
+        print(f"  Page {page}: processed {len(posts)} posts (oldest: {posts[-1]['created_at'][:10]})")
+
+    _store_backfill(counts_by_date)
+    return counts_by_date
+
+
+def _store_backfill(counts_by_date: dict):
+    """Store backfilled daily counts in the database."""
+    for date_str, count in sorted(counts_by_date.items()):
+        upsert_daily_count(date_str, count, replace=True)
+    print(f"Backfilled {len(counts_by_date)} days of data")
+    for date_str in sorted(counts_by_date.keys()):
+        print(f"  {date_str}: {counts_by_date[date_str]} posts")
+
+
+def fetch_post_count_csv() -> int | None:
+    """Read the latest manually entered count from CSV fallback."""
+    if not os.path.exists(CSV_PATH):
+        return None
+    try:
+        with open(CSV_PATH, "r") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+            if rows:
+                last = rows[-1]
+                return int(last["total_posts"])
+    except Exception as e:
+        print(f"CSV read error: {e}")
+    return None
+
+
+def add_manual_count(total_posts: int):
     """Manually add a count to the CSV fallback file."""
     os.makedirs(os.path.dirname(CSV_PATH), exist_ok=True)
     file_exists = os.path.exists(CSV_PATH)
     with open(CSV_PATH, "a", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["timestamp", "total_tweets"])
+        writer = csv.DictWriter(f, fieldnames=["timestamp", "total_posts"])
         if not file_exists:
             writer.writeheader()
         writer.writerow({
             "timestamp": datetime.utcnow().isoformat(),
-            "total_tweets": total_tweets,
+            "total_posts": total_posts,
         })
-    print(f"Manually recorded: {total_tweets:,} tweets")
+    print(f"Manually recorded: {total_posts:,} posts")

@@ -1,7 +1,7 @@
 """
-Configuration for the Elon Musk tweet tracker and predictor.
+Configuration for the Trump Truth Social post tracker and predictor.
 
-No API keys required! Uses Playwright to scrape x.com directly.
+No API keys required! Uses Truth Social's public Mastodon-compatible API.
 Optional: create a .env file for any overrides.
 """
 
@@ -10,13 +10,14 @@ from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 
-# Elon's profile
-ELON_USER_ID = "44196397"
-ELON_USERNAME = "elonmusk"
+# Trump's Truth Social profile
+TRUTH_SOCIAL_ACCOUNT_ID = "107780257626128497"
+TRUTH_SOCIAL_USERNAME = "realDonaldTrump"
+TRUTH_SOCIAL_API_BASE = "https://truthsocial.com/api/v1"
 
 # Data collection
 POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "30"))
-DB_PATH = os.path.join(os.path.dirname(__file__), "data", "tweets.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "data", "posts.db")
 
 # HMM Model
 N_HIDDEN_STATES = 3  # Low, Medium, High activity states

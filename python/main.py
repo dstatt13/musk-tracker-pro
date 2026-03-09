@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Elon Musk Tweet Tracker & Predictor
-====================================
-Runs 24/7 collecting tweet counts via web scraping and periodically retraining predictions.
+Trump Truth Social Post Tracker & Predictor
+=============================================
+Runs 24/7 collecting post counts via Truth Social's public API and periodically retraining predictions.
 
 Usage:
   1. pip install -r requirements.txt
-  2. playwright install chromium
-  3. python main.py
+  2. python main.py
 
 Options:
   --collect-only    Only collect data, don't run predictions
   --predict-only    Only run predictions on existing data
-  --threshold N D   Probability of ≥N tweets in D days (Polymarket helper)
-  --manual COUNT    Manually record a total tweet count (fallback)
+  --threshold N D   Probability of ≥N posts in D days (Polymarket helper)
+  --backfill [N]    Backfill daily counts from timeline history (default 30 days)
+  --manual COUNT    Manually record a total post count (fallback)
 """
 
 import sys
@@ -24,7 +24,7 @@ from datetime import datetime
 
 from config import POLL_INTERVAL_MINUTES
 from database import init_db, get_daily_counts
-from collector import collect_once, add_manual_count
+from collector import collect_once, add_manual_count, backfill_daily_counts
 from model import run_predictions, train_hmm, get_current_state, predict_polymarket_threshold, STATE_LABELS
 
 running = True
@@ -68,7 +68,7 @@ def polymarket_query(threshold: int, window_days: int):
     print(f"\n{'='*60}")
     print(f"POLYMARKET QUERY")
     print(f"{'='*60}")
-    print(f"Question: Will Elon tweet ≥{threshold} times in {window_days} days?")
+    print(f"Question: Will Trump post ≥{threshold} times in {window_days} days?")
     print(f"Current state: {STATE_LABELS[current_state]}")
     print(f"Estimated probability: {prob*100:.1f}%")
     print(f"{'='*60}")
@@ -94,12 +94,19 @@ def main():
             idx = sys.argv.index("--manual")
             count = int(sys.argv[idx + 1])
             add_manual_count(count)
-            # Also process it through the normal pipeline
-            from collector import fetch_tweet_count_csv
-            collect_once()
         except (IndexError, ValueError):
-            print("Usage: python main.py --manual <total_tweet_count>")
-            print("Example: python main.py --manual 42567")
+            print("Usage: python main.py --manual <total_post_count>")
+            print("Example: python main.py --manual 32567")
+        return
+
+    # Handle --backfill flag
+    if "--backfill" in sys.argv:
+        try:
+            idx = sys.argv.index("--backfill")
+            days = int(sys.argv[idx + 1]) if len(sys.argv) > idx + 1 and sys.argv[idx + 1].isdigit() else 30
+            backfill_daily_counts(days)
+        except Exception as e:
+            print(f"Backfill error: {e}")
         return
 
     if "--predict-only" in sys.argv:
@@ -113,7 +120,7 @@ def main():
             window = int(sys.argv[idx + 2])
             polymarket_query(threshold, window)
         except (IndexError, ValueError):
-            print("Usage: python main.py --threshold <min_tweets> <days>")
+            print("Usage: python main.py --threshold <min_posts> <days>")
             print("Example: python main.py --threshold 50 7")
         return
 
@@ -136,9 +143,9 @@ def main():
     collect_only = "--collect-only" in sys.argv
 
     # Initial collection
-    print("Starting Elon Musk Tweet Tracker...")
+    print("Starting Trump Truth Social Post Tracker...")
     print(f"Polling every {POLL_INTERVAL_MINUTES} minutes")
-    print("Using Playwright web scraper (no API key needed)")
+    print("Using Truth Social public Mastodon API (no API key needed)")
     collect_once()
 
     # Schedule jobs
@@ -150,6 +157,7 @@ def main():
             prediction_job()
         else:
             print(f"Need ≥14 days of data for predictions (have {len(rows)})")
+            print("TIP: Run 'python main.py --backfill 30' to instantly get ~30 days of data")
 
     # Main loop
     while running:

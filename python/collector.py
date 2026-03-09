@@ -127,6 +127,11 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
 
 def fetch_total_post_count() -> int | None:
     """Get Trump's exact total post count from profile lookup."""
+    if not TRUTH_SOCIAL_TOKEN:
+        print("⚠️  TRUTH_SOCIAL_TOKEN not set in .env — API requires authentication.")
+        print("   See .env.example for setup instructions.")
+        return None
+
     data = api_get(f"/accounts/{TRUTH_SOCIAL_ACCOUNT_ID}")
     if data and "statuses_count" in data:
         count = data["statuses_count"]

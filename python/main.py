@@ -41,7 +41,7 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 
 def collection_job():
-    print(f"\n[{datetime.utcnow().isoformat()}] Running collection...")
+    print(f"\n[{datetime.now(timezone.utc).isoformat()}] Running collection...")
     collect_once()
 
 

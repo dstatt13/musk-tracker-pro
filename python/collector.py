@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from database import insert_snapshot, get_last_snapshot, upsert_daily_count
-from config import TRUTH_SOCIAL_ACCOUNT_ID, TRUTH_SOCIAL_API_BASE, TRUTH_SOCIAL_USERNAME
+from config import TRUTH_SOCIAL_ACCOUNT_ID, TRUTH_SOCIAL_API_BASE, TRUTH_SOCIAL_USERNAME, TRUTH_SOCIAL_TOKEN
 
 CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "manual_counts.csv")
 

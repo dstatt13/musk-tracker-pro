@@ -79,7 +79,11 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
         query = "&".join(f"{k}={v}" for k, v in params.items())
         url = f"{url}?{query}"
 
-    req = Request(url, headers={"User-Agent": USER_AGENT})
+    headers = {"User-Agent": USER_AGENT}
+    if TRUTH_SOCIAL_TOKEN:
+        headers["Authorization"] = f"Bearer {TRUTH_SOCIAL_TOKEN}"
+
+    req = Request(url, headers=headers)
     try:
         with urlopen(req, timeout=30) as resp:
             remaining = _parse_rate_limit_headers(resp)

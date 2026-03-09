@@ -23,39 +23,89 @@ This starts the 24/7 collector. Let it run for ~14 days to gather enough data fo
 
 ### Data Collection
 
-#### Run 24/7 collector (default)
-```bash
-python main.py
-```
+| Command | Description |
+|---------|-------------|
+| `python main.py` | Start 24/7 collector + auto-predictions (after 14 days) |
+| `python main.py --collect-only` | Collect data only, no predictions |
+| `python main.py --manual <count>` | Manually record a total tweet count |
+
+### Predictions
+
+| Command | Description |
+|---------|-------------|
+| `python main.py --predict-only` | Run predictions on existing data (1, 3, 7, 14, 30 day forecasts) |
+| `python main.py --range <start> <end>` | Predict tweets for a specific date range |
+| `python main.py --range <start> <end> <threshold>` | Same + probability of hitting ≥threshold tweets |
+| `python main.py --threshold <min_tweets> <days>` | Polymarket query: probability of ≥N tweets in D days |
+
+---
+
+## Command Details & Examples
+
+### `python main.py` — 24/7 Collector
+
 Scrapes Elon's tweet count every hour, stores in SQLite. Predictions auto-activate after 14+ days of data.
 
-#### Collect data only (no predictions)
+```bash
+python main.py
+# Starting Elon Musk Tweet Tracker...
+# Polling every 60 minutes
+# Using Playwright web scraper (no API key needed)
+```
+
+Press `Ctrl+C` to stop gracefully. All data is persisted in `data/tweets.db`.
+
+---
+
+### `python main.py --collect-only` — Collect Without Predictions
+
+Same as default, but skips the prediction phase entirely. Useful when you just want to accumulate data.
+
 ```bash
 python main.py --collect-only
 ```
 
-#### Manual count entry (fallback if scraping fails)
+---
+
+### `python main.py --manual <count>` — Manual Count Entry
+
+Fallback when scraping fails (e.g., X blocks the request). Find the count on Elon's profile page (`x.com/elonmusk`).
+
 ```bash
 python main.py --manual 42567
+# Manually recorded: 42,567 tweets
 ```
-Manually record Elon's current total tweet count (find it on his profile page).
+
+Entries are saved to `data/manual_counts.csv` and also processed through the normal pipeline.
 
 ---
 
-### Predictions
+### `python main.py --predict-only` — Standard Predictions
 
-#### Standard predictions (next N days)
+Outputs forecasts for 1, 3, 7, 14, and 30 days ahead. Requires ≥14 days of collected data.
+
 ```bash
 python main.py --predict-only
 ```
-Outputs forecasts for 1, 3, 7, 14, and 30 days ahead.
 
-#### Custom date range
-```bash
-python main.py --range <start_date> <end_date> [threshold]
+**Output includes:**
+- HMM model summary (current state, state means, transition matrix)
+- Per-window forecasts: mean, median, 90% confidence interval, P(>0)
+
+```
+7-day forecast:
+  Mean:   48.3 tweets
+  Median: 46.0 tweets
+  90% CI: [18, 82]
+  P(>0):  100.0%
 ```
 
-**Examples:**
+---
+
+### `python main.py --range <start_date> <end_date> [threshold]` — Date Range Prediction
+
+Predict total tweets for a specific future date range. Accounts for uncertainty by simulating "lead days" between now and the start date.
+
 ```bash
 # Predict tweets from March 9-12, 2026
 python main.py --range 2026-03-09 2026-03-12
@@ -66,7 +116,7 @@ python main.py --range 2026-03-09 2026-03-12 50
 
 **Output includes:**
 - Summary stats (mean, median, 90% CI)
-- **Probability breakdown by range** — shows % chance of landing in each bucket:
+- Probability breakdown by range:
   ```
   PROBABILITY BREAKDOWN BY RANGE
   ============================================================
@@ -79,12 +129,12 @@ python main.py --range 2026-03-09 2026-03-12 50
   ```
 - Threshold probability with trading signal (if threshold provided)
 
-#### Polymarket threshold query
-```bash
-python main.py --threshold <min_tweets> <days>
-```
+---
 
-**Examples:**
+### `python main.py --threshold <min_tweets> <days>` — Polymarket Query
+
+Directly answers "Will Elon tweet ≥N times in D days?" with a probability and trading signal.
+
 ```bash
 # "Will Elon tweet ≥50 times in the next 7 days?"
 python main.py --threshold 50 7
@@ -105,6 +155,7 @@ Estimated probability: 72.3%
 ```
 
 **Signal guide:**
+
 | Probability | Signal | Action |
 |-------------|--------|--------|
 | >65% | STRONG YES | Buy YES shares |
@@ -139,16 +190,31 @@ The model learns:
 ### 3. Monte Carlo Simulation
 For predictions:
 1. Identify current state via Viterbi decoding
-2. Run 10,000 simulated futures:
-   - Each day: sample tweet count from current state's distribution
-   - Transition to next state based on learned probabilities
+2. Run 10,000 simulated futures
 3. Aggregate simulations into probability distributions
 
-### 4. Date Range Predictions
-For future date ranges (e.g., March 9-12):
-- Simulate through "lead days" (today → start date) without counting tweets
-- Then simulate the actual window
-- Uncertainty naturally grows for ranges further in the future
+---
+
+## Data Storage
+
+All data persists locally between runs:
+
+| File | Description |
+|------|-------------|
+| `data/tweets.db` | SQLite database (snapshots, daily counts, predictions) |
+| `data/manual_counts.csv` | Fallback manual entries |
+
+---
+
+## Configuration
+
+Edit `config.py` or create a `.env` file:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `POLL_INTERVAL_MINUTES` | 60 | How often to scrape |
+| `N_HIDDEN_STATES` | 3 | HMM states (Low/Medium/High) |
+| `N_SIMULATIONS` | 10,000 | Monte Carlo runs |
 
 ---
 
@@ -169,35 +235,14 @@ python/
 
 ---
 
-## Configuration
-
-Edit `config.py` or create a `.env` file:
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `POLL_INTERVAL_MINUTES` | 60 | How often to scrape |
-| `N_HIDDEN_STATES` | 3 | HMM states (Low/Medium/High) |
-| `N_SIMULATIONS` | 10,000 | Monte Carlo runs |
-
----
-
 ## Troubleshooting
 
-### "Playwright not installed"
-```bash
-pip install playwright
-python -m playwright install chromium
-```
-
-### "Could not find post count in page HTML"
-X may have changed their layout. Use manual entry as fallback:
-```bash
-python main.py --manual <count>
-```
-Find the count on Elon's profile page (`x.com/elonmusk`).
-
-### "Need ≥14 days of data"
-The HMM needs at least 2 weeks of daily counts to train reliably. Keep the collector running.
+| Problem | Solution |
+|---------|----------|
+| "Playwright not installed" | `pip install playwright && python -m playwright install chromium` |
+| "Could not find post count in page HTML" | X changed layout — use `--manual <count>` as fallback |
+| "Need ≥14 days of data" | Keep the collector running; HMM needs 2+ weeks to train |
+| Timeout errors | Expected — X streams data continuously; the scraper uses `domcontentloaded` to avoid this |
 
 ---
 

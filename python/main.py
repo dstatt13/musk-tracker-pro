@@ -2,17 +2,18 @@
 """
 Elon Musk Tweet Tracker & Predictor
 ====================================
-Runs 24/7 collecting tweet counts and periodically retraining predictions.
+Runs 24/7 collecting tweet counts via web scraping and periodically retraining predictions.
 
 Usage:
-  1. Create python/.env with: X_BEARER_TOKEN=your_token
-  2. pip install -r requirements.txt
+  1. pip install -r requirements.txt
+  2. playwright install chromium
   3. python main.py
 
 Options:
   --collect-only    Only collect data, don't run predictions
   --predict-only    Only run predictions on existing data
   --threshold N D   Probability of ≥N tweets in D days (Polymarket helper)
+  --manual COUNT    Manually record a total tweet count (fallback)
 """
 
 import sys
@@ -21,9 +22,9 @@ import signal
 import schedule
 from datetime import datetime
 
-from config import POLL_INTERVAL_MINUTES, BEARER_TOKEN
+from config import POLL_INTERVAL_MINUTES
 from database import init_db, get_daily_counts
-from collector import collect_once
+from collector import collect_once, add_manual_count
 from model import run_predictions, train_hmm, get_current_state, predict_polymarket_threshold, STATE_LABELS
 
 running = True
@@ -85,15 +86,22 @@ def polymarket_query(threshold: int, window_days: int):
 
 
 def main():
-    if not BEARER_TOKEN:
-        print("ERROR: X_BEARER_TOKEN not set.")
-        print("Create python/.env with: X_BEARER_TOKEN=your_bearer_token")
-        print("\nGet one at: https://developer.x.com/en/portal/dashboard")
-        sys.exit(1)
-
     init_db()
 
-    # Handle CLI arguments
+    # Handle --manual flag
+    if "--manual" in sys.argv:
+        try:
+            idx = sys.argv.index("--manual")
+            count = int(sys.argv[idx + 1])
+            add_manual_count(count)
+            # Also process it through the normal pipeline
+            from collector import fetch_tweet_count_csv
+            collect_once()
+        except (IndexError, ValueError):
+            print("Usage: python main.py --manual <total_tweet_count>")
+            print("Example: python main.py --manual 42567")
+        return
+
     if "--predict-only" in sys.argv:
         run_predictions()
         return
@@ -114,13 +122,13 @@ def main():
     # Initial collection
     print("Starting Elon Musk Tweet Tracker...")
     print(f"Polling every {POLL_INTERVAL_MINUTES} minutes")
+    print("Using Playwright web scraper (no API key needed)")
     collect_once()
 
     # Schedule jobs
     schedule.every(POLL_INTERVAL_MINUTES).minutes.do(collection_job)
     if not collect_only:
         schedule.every(6).hours.do(prediction_job)
-        # Run initial prediction if we have enough data
         rows = get_daily_counts()
         if len(rows) >= 14:
             prediction_job()

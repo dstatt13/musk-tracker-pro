@@ -50,7 +50,7 @@ def insert_snapshot(total_tweets: int, delta: int):
     conn = get_connection()
     conn.execute(
         "INSERT INTO tweet_snapshots (timestamp, total_tweets, delta_since_last) VALUES (?, ?, ?)",
-        (datetime.utcnow().isoformat(), total_tweets, delta),
+        (datetime.now(timezone.utc).isoformat(), total_tweets, delta),
     )
     conn.commit()
     conn.close()

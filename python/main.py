@@ -117,6 +117,22 @@ def main():
             print("Example: python main.py --threshold 50 7")
         return
 
+    if "--range" in sys.argv:
+        try:
+            from model import predict_date_range
+            idx = sys.argv.index("--range")
+            start_date = sys.argv[idx + 1]
+            end_date = sys.argv[idx + 2]
+            threshold = None
+            if len(sys.argv) > idx + 3 and sys.argv[idx + 3].isdigit():
+                threshold = int(sys.argv[idx + 3])
+            predict_date_range(start_date, end_date, threshold)
+        except (IndexError, ValueError):
+            print("Usage: python main.py --range <start_date> <end_date> [threshold]")
+            print("Example: python main.py --range 2026-03-09 2026-03-12")
+            print("Example: python main.py --range 2026-03-09 2026-03-12 50")
+        return
+
     collect_only = "--collect-only" in sys.argv
 
     # Initial collection

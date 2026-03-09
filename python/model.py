@@ -170,3 +170,102 @@ def predict_polymarket_threshold(
     pred = monte_carlo_predict(model, current_state, window_days)
     prob = float(np.mean(pred["distribution"] >= threshold))
     return prob
+
+
+def predict_date_range(start_date: str, end_date: str, threshold: int | None = None) -> dict | None:
+    """
+    Predict tweet count for a specific date range (e.g., '2026-03-09' to '2026-03-12').
+
+    Accounts for days between now and start_date by simulating through them first,
+    then predicts over the actual window. This means the uncertainty grows the further
+    out the range is from today.
+    """
+    from datetime import datetime, date
+
+    rows = get_daily_counts()
+    if not rows or len(rows) < 14:
+        print(f"Need ≥14 days of data (have {len(rows)}). Collect more first.")
+        return None
+
+    daily_counts = [r["tweet_count"] for r in rows]
+    model = train_hmm(daily_counts)
+    if model is None:
+        return None
+
+    current_state = get_current_state(model, daily_counts)
+    state_label = STATE_LABELS.get(current_state, "Unknown")
+
+    start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    today = date.today()
+
+    if end <= start:
+        print("Error: end date must be after start date")
+        return None
+
+    # Days from today to start of window (lead time to simulate through)
+    lead_days = max(0, (start - today).days)
+    # Days in the actual prediction window
+    window_days = (end - start).days
+
+    trans = model.transmat_
+    means = model.means_.flatten()
+    stds = np.sqrt(model.covars_.flatten())
+
+    totals = np.zeros(N_SIMULATIONS)
+    for sim in range(N_SIMULATIONS):
+        state = current_state
+
+        # Simulate through lead days (we don't count these tweets)
+        for _ in range(lead_days):
+            state = np.random.choice(N_HIDDEN_STATES, p=trans[state])
+
+        # Now simulate the actual window
+        total = 0.0
+        for _ in range(window_days):
+            daily = max(0, np.random.normal(means[state], stds[state]))
+            total += daily
+            state = np.random.choice(N_HIDDEN_STATES, p=trans[state])
+
+        totals[sim] = total
+
+    result = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "window_days": window_days,
+        "lead_days": lead_days,
+        "mean": float(np.mean(totals)),
+        "median": float(np.median(totals)),
+        "ci_5": float(np.percentile(totals, 5)),
+        "ci_95": float(np.percentile(totals, 95)),
+        "ci_25": float(np.percentile(totals, 25)),
+        "ci_75": float(np.percentile(totals, 75)),
+        "prob_gt_0": float(np.mean(totals > 0)),
+        "distribution": totals,
+    }
+
+    print(f"\n{'='*60}")
+    print(f"DATE RANGE PREDICTION: {start_date} → {end_date}")
+    print(f"{'='*60}")
+    print(f"Window: {window_days} days (starts in {lead_days} days)")
+    print(f"Current state: {state_label}")
+    print(f"Mean:   {result['mean']:.1f} tweets")
+    print(f"Median: {result['median']:.1f} tweets")
+    print(f"90% CI: [{result['ci_5']:.0f}, {result['ci_95']:.0f}]")
+    print(f"P(>0):  {result['prob_gt_0']*100:.1f}%")
+
+    if threshold is not None:
+        prob = float(np.mean(totals >= threshold))
+        print(f"\nP(≥{threshold} tweets): {prob*100:.1f}%")
+        if prob > 0.65:
+            print("→ Signal: STRONG YES")
+        elif prob > 0.55:
+            print("→ Signal: LEAN YES")
+        elif prob > 0.45:
+            print("→ Signal: COIN FLIP — no edge")
+        elif prob > 0.35:
+            print("→ Signal: LEAN NO")
+        else:
+            print("→ Signal: STRONG NO")
+
+    return result

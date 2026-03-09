@@ -237,9 +237,9 @@ def collect_once() -> int | None:
     today_count = count_posts_today()
     if today_count > 0:
         upsert_daily_count(today, today_count, replace=True)
-        print(f"[{datetime.utcnow().isoformat()}] Total: {total:,}, Today's posts: {today_count}")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Total: {total:,}, Today's posts: {today_count}")
     else:
-        print(f"[{datetime.utcnow().isoformat()}] Total: {total:,}, Delta: +{delta}")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Total: {total:,}, Delta: +{delta}")
         if delta > 0:
             upsert_daily_count(today, delta)
 

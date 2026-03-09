@@ -19,7 +19,7 @@ from datetime import datetime, timezone, timedelta
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
 from database import insert_snapshot, get_last_snapshot, upsert_daily_count
-from config import TRUTH_SOCIAL_ACCOUNT_ID, TRUTH_SOCIAL_API_BASE, TRUTH_SOCIAL_USERNAME
+from config import TRUTH_SOCIAL_ACCOUNT_ID, TRUTH_SOCIAL_API_BASE, TRUTH_SOCIAL_USERNAME, TRUTH_SOCIAL_TOKEN
 
 CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "manual_counts.csv")
 
@@ -79,7 +79,11 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
         query = "&".join(f"{k}={v}" for k, v in params.items())
         url = f"{url}?{query}"
 
-    req = Request(url, headers={"User-Agent": USER_AGENT})
+    headers = {"User-Agent": USER_AGENT}
+    if TRUTH_SOCIAL_TOKEN:
+        headers["Authorization"] = f"Bearer {TRUTH_SOCIAL_TOKEN}"
+
+    req = Request(url, headers=headers)
     try:
         with urlopen(req, timeout=30) as resp:
             remaining = _parse_rate_limit_headers(resp)
@@ -123,6 +127,11 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
 
 def fetch_total_post_count() -> int | None:
     """Get Trump's exact total post count from profile lookup."""
+    if not TRUTH_SOCIAL_TOKEN:
+        print("⚠️  TRUTH_SOCIAL_TOKEN not set in .env — API requires authentication.")
+        print("   See .env.example for setup instructions.")
+        return None
+
     data = api_get(f"/accounts/{TRUTH_SOCIAL_ACCOUNT_ID}")
     if data and "statuses_count" in data:
         count = data["statuses_count"]
@@ -213,7 +222,7 @@ def collect_once() -> int | None:
     """
     total = fetch_total_post_count()
     if total is None:
-        print(f"[{datetime.utcnow().isoformat()}] Failed to fetch post count")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Failed to fetch post count")
         return None
 
     last = get_last_snapshot()
@@ -228,9 +237,9 @@ def collect_once() -> int | None:
     today_count = count_posts_today()
     if today_count > 0:
         upsert_daily_count(today, today_count, replace=True)
-        print(f"[{datetime.utcnow().isoformat()}] Total: {total:,}, Today's posts: {today_count}")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Total: {total:,}, Today's posts: {today_count}")
     else:
-        print(f"[{datetime.utcnow().isoformat()}] Total: {total:,}, Delta: +{delta}")
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Total: {total:,}, Delta: +{delta}")
         if delta > 0:
             upsert_daily_count(today, delta)
 
@@ -316,7 +325,7 @@ def add_manual_count(total_posts: int):
         if not file_exists:
             writer.writeheader()
         writer.writerow({
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "total_posts": total_posts,
         })
     print(f"Manually recorded: {total_posts:,} posts")

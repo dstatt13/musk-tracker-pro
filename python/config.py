@@ -14,6 +14,7 @@ load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
 TRUTH_SOCIAL_ACCOUNT_ID = "107780257626128497"
 TRUTH_SOCIAL_USERNAME = "realDonaldTrump"
 TRUTH_SOCIAL_API_BASE = "https://truthsocial.com/api/v1"
+TRUTH_SOCIAL_TOKEN = os.getenv("TRUTH_SOCIAL_TOKEN", "")  # OAuth bearer token
 
 # Data collection
 POLL_INTERVAL_MINUTES = int(os.getenv("POLL_INTERVAL_MINUTES", "30"))

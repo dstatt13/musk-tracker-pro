@@ -2,7 +2,7 @@
 
 import sqlite3
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from config import DB_PATH
 
 
@@ -50,7 +50,7 @@ def insert_snapshot(total_tweets: int, delta: int):
     conn = get_connection()
     conn.execute(
         "INSERT INTO tweet_snapshots (timestamp, total_tweets, delta_since_last) VALUES (?, ?, ?)",
-        (datetime.utcnow().isoformat(), total_tweets, delta),
+        (datetime.now(timezone.utc).isoformat(), total_tweets, delta),
     )
     conn.commit()
     conn.close()
@@ -97,7 +97,7 @@ def insert_prediction(window_days: int, mean: float, median: float,
     conn.execute(
         "INSERT INTO predictions (generated_at, window_days, predicted_mean, predicted_median, "
         "ci_lower_5, ci_upper_95, current_state, state_label) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (datetime.utcnow().isoformat(), window_days, mean, median, ci_lower, ci_upper, state, state_label),
+        (datetime.now(timezone.utc).isoformat(), window_days, mean, median, ci_lower, ci_upper, state, state_label),
     )
     conn.commit()
     conn.close()

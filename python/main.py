@@ -20,7 +20,7 @@ import sys
 import time
 import signal
 import schedule
-from datetime import datetime
+from datetime import datetime, timezone
 
 from config import POLL_INTERVAL_MINUTES
 from database import init_db, get_daily_counts
@@ -41,12 +41,12 @@ signal.signal(signal.SIGTERM, signal_handler)
 
 
 def collection_job():
-    print(f"\n[{datetime.utcnow().isoformat()}] Running collection...")
+    print(f"\n[{datetime.now(timezone.utc).isoformat()}] Running collection...")
     collect_once()
 
 
 def prediction_job():
-    print(f"\n[{datetime.utcnow().isoformat()}] Running predictions...")
+    print(f"\n[{datetime.now(timezone.utc).isoformat()}] Running predictions...")
     run_predictions()
 
 

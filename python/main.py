@@ -20,7 +20,7 @@ import sys
 import time
 import signal
 import schedule
-from datetime import datetime
+from datetime import datetime, timezone
 
 from config import POLL_INTERVAL_MINUTES
 from database import init_db, get_daily_counts

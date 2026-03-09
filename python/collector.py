@@ -156,19 +156,27 @@ def collect_once() -> int | None:
     return today_count or delta
 
 
-def backfill_daily_counts(days: int = 30):
+def backfill_daily_counts(days: int = 30, batch_size: int = 5, cooldown: int = 60):
     """
-    Backfill daily post counts by paginating through the timeline history.
-    Useful for building up initial training data faster.
+    Backfill daily post counts in batches to avoid 429 rate limits.
+
+    Args:
+        days: Total days of history to backfill.
+        batch_size: Days to fetch per batch before pausing.
+        cooldown: Seconds to wait between batches.
     """
-    print(f"Backfilling daily counts for the last {days} days...")
+    import time
+
+    print(f"Backfilling {days} days in batches of {batch_size} days ({cooldown}s cooldown)...")
     today = datetime.now(timezone.utc).date()
-    counts_by_date = {}
-    max_id = None
     cutoff = (today - timedelta(days=days)).strftime("%Y-%m-%d")
+    all_counts = {}
+    max_id = None
+    batch_start_date = None
+    days_seen_in_batch = set()
 
     page = 0
-    while page < 100:  # Safety limit
+    while page < 200:
         params = {"limit": "40", "exclude_replies": "false"}
         if max_id:
             params["max_id"] = max_id
@@ -180,17 +188,30 @@ def backfill_daily_counts(days: int = 30):
         for post in posts:
             post_date = post["created_at"][:10]
             if post_date < cutoff:
-                # Done — store everything and return
-                _store_backfill(counts_by_date)
-                return counts_by_date
-            counts_by_date[post_date] = counts_by_date.get(post_date, 0) + 1
+                _store_backfill(all_counts)
+                return all_counts
+
+            all_counts[post_date] = all_counts.get(post_date, 0) + 1
+
+            if batch_start_date is None:
+                batch_start_date = post_date
+            days_seen_in_batch.add(post_date)
 
         max_id = posts[-1]["id"]
         page += 1
-        print(f"  Page {page}: processed {len(posts)} posts (oldest: {posts[-1]['created_at'][:10]})")
+        oldest = posts[-1]["created_at"][:10]
+        print(f"  Page {page}: processed {len(posts)} posts (oldest: {oldest})")
 
-    _store_backfill(counts_by_date)
-    return counts_by_date
+        # Check if we've filled a batch worth of days
+        if len(days_seen_in_batch) >= batch_size:
+            _store_backfill(all_counts)
+            print(f"  ✓ Batch done ({len(days_seen_in_batch)} days). Cooling down {cooldown}s...")
+            days_seen_in_batch.clear()
+            batch_start_date = None
+            time.sleep(cooldown)
+
+    _store_backfill(all_counts)
+    return all_counts
 
 
 def _store_backfill(counts_by_date: dict):

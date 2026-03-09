@@ -40,8 +40,8 @@ def train_hmm(daily_counts: list[int]) -> hmm.GaussianHMM | None:
     # Sort states by mean emission (so state 0 = lowest activity)
     means = model.means_.flatten()
     order = np.argsort(means)
-    model.means_ = model.means_[order]
-    model.covars_ = model.covars_[order]
+    model.means_ = model.means_[order].reshape(-1, 1)
+    model.covars_ = model.covars_[order].reshape(N_HIDDEN_STATES, -1)
     model.transmat_ = model.transmat_[np.ix_(order, order)]
     model.startprob_ = model.startprob_[order]
 

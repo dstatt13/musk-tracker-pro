@@ -217,33 +217,38 @@ def count_posts_by_date(target_date: str) -> int:
 
 def collect_once() -> int | None:
     """
-    Fetch current total count, compute delta, store snapshot and daily count.
-    Also counts today's posts individually for granular daily data.
+    Fetch current post counts and store snapshot + daily count.
+    Tries profile lookup first (requires token), falls back to counting posts directly.
     """
-    total = fetch_total_post_count()
-    if total is None:
-        print(f"[{datetime.now(timezone.utc).isoformat()}] Failed to fetch post count")
-        return None
-
-    last = get_last_snapshot()
-    delta = 0
-    if last:
-        delta = max(0, total - last["total_tweets"])
-
-    insert_snapshot(total, delta)
-
-    # Also get granular daily count by counting individual posts
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Try profile lookup for total count (may require auth)
+    total = fetch_total_post_count()
+
+    # Always count today's posts individually (works without token)
     today_count = count_posts_today()
+
+    if total is not None:
+        last = get_last_snapshot()
+        delta = max(0, total - last["total_tweets"]) if last else 0
+        insert_snapshot(total, delta)
+
+        if today_count > 0:
+            upsert_daily_count(today, today_count, replace=True)
+            print(f"[{datetime.now(timezone.utc).isoformat()}] Total: {total:,}, Today's posts: {today_count}")
+        elif delta > 0:
+            upsert_daily_count(today, delta)
+            print(f"[{datetime.now(timezone.utc).isoformat()}] Total: {total:,}, Delta: +{delta}")
+        return today_count or delta
+
+    # No token / profile failed — just use post counting
     if today_count > 0:
         upsert_daily_count(today, today_count, replace=True)
-        print(f"[{datetime.now(timezone.utc).isoformat()}] Total: {total:,}, Today's posts: {today_count}")
-    else:
-        print(f"[{datetime.now(timezone.utc).isoformat()}] Total: {total:,}, Delta: +{delta}")
-        if delta > 0:
-            upsert_daily_count(today, delta)
+        print(f"[{datetime.now(timezone.utc).isoformat()}] Today's posts (from timeline): {today_count}")
+        return today_count
 
-    return today_count or delta
+    print(f"[{datetime.now(timezone.utc).isoformat()}] No posts found for today yet")
+    return 0
 
 
 def backfill_daily_counts(days: int = 30):

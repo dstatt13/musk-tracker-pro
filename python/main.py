@@ -46,7 +46,7 @@ def collection_job():
 
 
 def prediction_job():
-    print(f"\n[{datetime.utcnow().isoformat()}] Running predictions...")
+    print(f"\n[{datetime.now(timezone.utc).isoformat()}] Running predictions...")
     run_predictions()
 
 

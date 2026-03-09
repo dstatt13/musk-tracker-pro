@@ -325,7 +325,7 @@ def add_manual_count(total_posts: int):
         if not file_exists:
             writer.writeheader()
         writer.writerow({
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
             "total_posts": total_posts,
         })
     print(f"Manually recorded: {total_posts:,} posts")

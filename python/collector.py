@@ -39,21 +39,14 @@ def fetch_tweet_count_playwright() -> int | None:
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             )
             page = context.new_page()
-            page.goto(ELON_PROFILE_URL, wait_until="networkidle", timeout=30000)
+            # Use "domcontentloaded" — x.com never reaches "networkidle"
+            page.goto(ELON_PROFILE_URL, wait_until="domcontentloaded", timeout=30000)
 
-            # Wait for profile to load
-            page.wait_for_timeout(3000)
-
-            # Try multiple selectors for the posts count
-            # X shows it as "XX.XK posts" in the profile header area
-            selectors = [
-                'a[href="/elonmusk"] span',  # Direct link to posts
-                '[data-testid="UserProfileHeader_Items"]',
-                'h2[role="heading"]',
-            ]
+            # Wait for profile content to render
+            page.wait_for_timeout(5000)
 
             html = page.content()
             browser.close()

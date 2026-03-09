@@ -5,11 +5,16 @@ No API keys or authentication required for public profiles.
 Two collection methods:
   1. Profile lookup — gets total statuses_count (exact, not rounded)
   2. Timeline scrape — counts individual posts per day (granular)
+
+Rate limiting:
+  Truth Social's Mastodon API allows ~300 requests per 5 minutes per IP.
+  The collector reads X-RateLimit-Remaining headers and pauses automatically.
 """
 
 import csv
 import os
 import json
+import time
 from datetime import datetime, timezone, timedelta
 from urllib.request import urlopen, Request
 from urllib.error import URLError, HTTPError
@@ -20,9 +25,55 @@ CSV_PATH = os.path.join(os.path.dirname(__file__), "data", "manual_counts.csv")
 
 USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
 
+# Rate limit state
+_rate_limit_remaining = None
+_rate_limit_reset = None
+
+RATE_LIMIT_BUFFER = 5        # Pause when this many requests remain
+RATE_LIMIT_COOLDOWN = 300    # 5 minutes default cooldown
+
+
+def _parse_rate_limit_headers(resp):
+    """Read rate limit headers from response and update global state."""
+    global _rate_limit_remaining, _rate_limit_reset
+
+    remaining = resp.headers.get("X-RateLimit-Remaining")
+    reset = resp.headers.get("X-RateLimit-Reset")
+
+    if remaining is not None:
+        _rate_limit_remaining = int(remaining)
+    if reset is not None:
+        _rate_limit_reset = reset
+
+    return _rate_limit_remaining
+
+
+def _wait_if_rate_limited():
+    """Check rate limit state and sleep if we're close to the limit."""
+    global _rate_limit_remaining, _rate_limit_reset
+
+    if _rate_limit_remaining is not None and _rate_limit_remaining <= RATE_LIMIT_BUFFER:
+        # Calculate wait time from reset header, or default to 5 min
+        wait_seconds = RATE_LIMIT_COOLDOWN
+        if _rate_limit_reset:
+            try:
+                # Mastodon returns ISO 8601 timestamp
+                reset_time = datetime.fromisoformat(_rate_limit_reset.replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                wait_seconds = max(10, int((reset_time - now).total_seconds()) + 5)
+            except (ValueError, TypeError):
+                pass
+
+        print(f"  ⏳ Rate limit approaching ({_rate_limit_remaining} remaining). "
+              f"Waiting {wait_seconds}s until reset...")
+        time.sleep(wait_seconds)
+        _rate_limit_remaining = None  # Reset after waiting
+
 
 def api_get(endpoint: str, params: dict = None) -> dict | list | None:
-    """Make a GET request to Truth Social's Mastodon API."""
+    """Make a GET request to Truth Social's Mastodon API with rate limit awareness."""
+    _wait_if_rate_limited()
+
     url = f"{TRUTH_SOCIAL_API_BASE}{endpoint}"
     if params:
         query = "&".join(f"{k}={v}" for k, v in params.items())
@@ -31,8 +82,41 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
     req = Request(url, headers={"User-Agent": USER_AGENT})
     try:
         with urlopen(req, timeout=30) as resp:
+            remaining = _parse_rate_limit_headers(resp)
+            if remaining is not None:
+                limit = resp.headers.get("X-RateLimit-Limit", "?")
+                print(f"  [Rate limit: {remaining}/{limit} remaining]")
             return json.loads(resp.read().decode())
-    except (URLError, HTTPError) as e:
+    except HTTPError as e:
+        if e.code == 429:
+            # Read retry info from error response
+            retry_after = e.headers.get("Retry-After")
+            reset = e.headers.get("X-RateLimit-Reset")
+            wait = RATE_LIMIT_COOLDOWN
+
+            if retry_after:
+                wait = int(retry_after) + 5
+            elif reset:
+                try:
+                    reset_time = datetime.fromisoformat(reset.replace("Z", "+00:00"))
+                    wait = max(10, int((reset_time - datetime.now(timezone.utc)).total_seconds()) + 5)
+                except (ValueError, TypeError):
+                    pass
+
+            print(f"  🚫 429 Too Many Requests. Waiting {wait}s...")
+            time.sleep(wait)
+            # Retry once after waiting
+            try:
+                with urlopen(req, timeout=30) as resp:
+                    _parse_rate_limit_headers(resp)
+                    return json.loads(resp.read().decode())
+            except (URLError, HTTPError) as e2:
+                print(f"  Retry failed: {e2}")
+                return None
+        else:
+            print(f"API error ({url}): {e}")
+            return None
+    except URLError as e:
         print(f"API error ({url}): {e}")
         return None
 
@@ -69,7 +153,7 @@ def count_posts_today() -> int:
     count = 0
     max_id = None
 
-    for _ in range(10):  # Max 10 pages (400 posts) to prevent infinite loops
+    for _ in range(10):
         params = {"limit": "40", "exclude_replies": "false"}
         if max_id:
             params["max_id"] = max_id
@@ -79,14 +163,12 @@ def count_posts_today() -> int:
             break
 
         for post in posts:
-            post_date = post["created_at"][:10]  # "2026-03-09T..."
+            post_date = post["created_at"][:10]
             if post_date == today:
                 count += 1
             elif post_date < today:
-                # We've gone past today, stop
                 return count
 
-        # Set up pagination
         if posts:
             max_id = posts[-1]["id"]
         else:
@@ -100,7 +182,7 @@ def count_posts_by_date(target_date: str) -> int:
     count = 0
     max_id = None
 
-    for _ in range(20):  # Max 20 pages
+    for _ in range(20):
         params = {"limit": "40", "exclude_replies": "false"}
         if max_id:
             params["max_id"] = max_id
@@ -145,7 +227,6 @@ def collect_once() -> int | None:
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     today_count = count_posts_today()
     if today_count > 0:
-        # Use the actual counted posts rather than the delta
         upsert_daily_count(today, today_count, replace=True)
         print(f"[{datetime.utcnow().isoformat()}] Total: {total:,}, Today's posts: {today_count}")
     else:
@@ -156,27 +237,21 @@ def collect_once() -> int | None:
     return today_count or delta
 
 
-def backfill_daily_counts(days: int = 30, batch_size: int = 5, cooldown: int = 60):
+def backfill_daily_counts(days: int = 30):
     """
-    Backfill daily post counts in batches to avoid 429 rate limits.
-
-    Args:
-        days: Total days of history to backfill.
-        batch_size: Days to fetch per batch before pausing.
-        cooldown: Seconds to wait between batches.
+    Backfill daily post counts by paginating through the timeline history.
+    Rate-limit-aware: reads X-RateLimit-Remaining and pauses automatically.
+    Saves progress after each batch of days.
     """
-    import time
-
-    print(f"Backfilling {days} days in batches of {batch_size} days ({cooldown}s cooldown)...")
+    print(f"Backfilling {days} days (rate-limit-aware, auto-pausing)...")
     today = datetime.now(timezone.utc).date()
     cutoff = (today - timedelta(days=days)).strftime("%Y-%m-%d")
     all_counts = {}
     max_id = None
-    batch_start_date = None
-    days_seen_in_batch = set()
+    last_saved_days = 0
 
     page = 0
-    while page < 200:
+    while page < 500:  # Safety limit
         params = {"limit": "40", "exclude_replies": "false"}
         if max_id:
             params["max_id"] = max_id
@@ -190,25 +265,18 @@ def backfill_daily_counts(days: int = 30, batch_size: int = 5, cooldown: int = 6
             if post_date < cutoff:
                 _store_backfill(all_counts)
                 return all_counts
-
             all_counts[post_date] = all_counts.get(post_date, 0) + 1
-
-            if batch_start_date is None:
-                batch_start_date = post_date
-            days_seen_in_batch.add(post_date)
 
         max_id = posts[-1]["id"]
         page += 1
         oldest = posts[-1]["created_at"][:10]
-        print(f"  Page {page}: processed {len(posts)} posts (oldest: {oldest})")
+        print(f"  Page {page}: {len(posts)} posts (oldest: {oldest}) "
+              f"[{len(all_counts)} days collected]")
 
-        # Check if we've filled a batch worth of days
-        if len(days_seen_in_batch) >= batch_size:
+        # Save progress every 5 new days
+        if len(all_counts) >= last_saved_days + 5:
             _store_backfill(all_counts)
-            print(f"  ✓ Batch done ({len(days_seen_in_batch)} days). Cooling down {cooldown}s...")
-            days_seen_in_batch.clear()
-            batch_start_date = None
-            time.sleep(cooldown)
+            last_saved_days = len(all_counts)
 
     _store_backfill(all_counts)
     return all_counts

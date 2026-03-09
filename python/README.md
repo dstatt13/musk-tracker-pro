@@ -212,7 +212,7 @@ Edit `config.py` or create a `.env` file:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `POLL_INTERVAL_MINUTES` | 60 | How often to scrape |
+| `POLL_INTERVAL_MINUTES` | 30 | How often to scrape |
 | `N_HIDDEN_STATES` | 3 | HMM states (Low/Medium/High) |
 | `N_SIMULATIONS` | 10,000 | Monte Carlo runs |
 

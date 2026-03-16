@@ -83,6 +83,7 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
     if TRUTH_SOCIAL_TOKEN:
         headers["Authorization"] = f"Bearer {TRUTH_SOCIAL_TOKEN}"
 
+    print(f"  🔗 GET {url}")
     req = Request(url, headers=headers)
     try:
         with urlopen(req, timeout=30) as resp:
@@ -90,7 +91,13 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
             if remaining is not None:
                 limit = resp.headers.get("X-RateLimit-Limit", "?")
                 print(f"  [Rate limit: {remaining}/{limit} remaining]")
-            return json.loads(resp.read().decode())
+            raw = resp.read().decode()
+            data = json.loads(raw)
+            if isinstance(data, list):
+                print(f"  ✅ Got {len(data)} items")
+            elif isinstance(data, dict):
+                print(f"  ✅ Got response (keys: {list(data.keys())[:5]})")
+            return data
     except HTTPError as e:
         if e.code == 429:
             # Read retry info from error response

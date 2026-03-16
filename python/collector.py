@@ -83,6 +83,7 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
     if TRUTH_SOCIAL_TOKEN:
         headers["Authorization"] = f"Bearer {TRUTH_SOCIAL_TOKEN}"
 
+    print(f"  🔗 GET {url}")
     req = Request(url, headers=headers)
     try:
         with urlopen(req, timeout=30) as resp:
@@ -90,7 +91,13 @@ def api_get(endpoint: str, params: dict = None) -> dict | list | None:
             if remaining is not None:
                 limit = resp.headers.get("X-RateLimit-Limit", "?")
                 print(f"  [Rate limit: {remaining}/{limit} remaining]")
-            return json.loads(resp.read().decode())
+            raw = resp.read().decode()
+            data = json.loads(raw)
+            if isinstance(data, list):
+                print(f"  ✅ Got {len(data)} items")
+            elif isinstance(data, dict):
+                print(f"  ✅ Got response (keys: {list(data.keys())[:5]})")
+            return data
     except HTTPError as e:
         if e.code == 429:
             # Read retry info from error response
@@ -159,30 +166,38 @@ def fetch_posts_since(since_id: str = None, limit: int = 40) -> list[dict]:
 def count_posts_today() -> int:
     """Count how many posts Trump made today by paginating through the timeline."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    print(f"  📅 Counting posts for today (UTC): {today}")
     count = 0
     max_id = None
 
-    for _ in range(10):
+    for page in range(10):
         params = {"limit": "40", "exclude_replies": "false"}
         if max_id:
             params["max_id"] = max_id
 
         posts = api_get(f"/accounts/{TRUTH_SOCIAL_ACCOUNT_ID}/statuses", params)
         if not posts:
+            print(f"  ⚠️ Page {page}: API returned empty/None")
             break
 
+        dates_seen = set()
         for post in posts:
             post_date = post["created_at"][:10]
+            dates_seen.add(post_date)
             if post_date == today:
                 count += 1
             elif post_date < today:
+                print(f"  📊 Found {count} posts for {today} (hit older date {post_date})")
                 return count
+
+        print(f"  Page {page}: {len(posts)} posts, dates: {sorted(dates_seen, reverse=True)}, running count: {count}")
 
         if posts:
             max_id = posts[-1]["id"]
         else:
             break
 
+    print(f"  📊 Total posts found for {today}: {count}")
     return count
 
 
